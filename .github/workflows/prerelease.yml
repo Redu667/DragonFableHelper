@@ -164,6 +164,24 @@ jobs:
         working-directory: packages/host-android
         run: gradle assembleDebug --no-daemon
 
+      # The whole mobile design rests on the web bundle being inside the APK.
+      # If the copy silently produced nothing the app would still install and
+      # then show a blank screen, so assert it rather than trust it.
+      - name: Verify the APK carries the web bundle
+        working-directory: packages/host-android
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          echo "APK size: $(du -h "$APK" | cut -f1)"
+          contents=$(unzip -l "$APK")
+          for required in assets/dfh/index.html assets/dfh/assets; do
+            if ! grep -q "$required" <<<"$contents"; then
+              echo "::error::APK is missing $required - the web bundle did not make it in"
+              exit 1
+            fi
+          done
+          echo "Bundled web assets:"
+          grep 'assets/dfh/' <<<"$contents"
+
       - name: Upload to release
         run: |
           cp packages/host-android/app/build/outputs/apk/debug/app-debug.apk \

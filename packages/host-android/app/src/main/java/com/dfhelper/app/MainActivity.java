@@ -2,6 +2,7 @@ package com.dfhelper.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.pm.ApplicationInfo;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -56,7 +57,11 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         webView = findViewById(R.id.webview);
 
-        if (BuildConfig.DEBUG) {
+        // AGP 8 stops generating BuildConfig unless the feature is switched on,
+        // and the installed app's debuggable flag is the better signal anyway.
+        // With this on you can attach Chrome DevTools to the WebView the bot
+        // itself runs in.
+        if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             WebView.setWebContentsDebuggingEnabled(true);
         }
 

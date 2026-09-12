@@ -1,0 +1,19 @@
+{
+  "name": "dragonfable-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A scriptable DragonFable automation client, in the spirit of Skua/Grimlite for AQW",
+  "license": "MIT",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @dfh/core test",
+    "dev": "pnpm --filter @dfh/host dev",
+    "start": "pnpm --filter @dfh/host start"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

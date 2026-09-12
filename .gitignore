@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+build/
+*.log
+.DS_Store
+.vite/
+coverage/
+packages/host/game/*.swf
+packages/host/game/ruffle/
+.env
+.env.local
+
+# Generated: the web bundle is copied into the APK at build time
+packages/host-android/app/src/main/assets/dfh/
+packages/host-android/.gradle/
+packages/host-android/local.properties

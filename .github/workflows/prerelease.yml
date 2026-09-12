@@ -1,0 +1,165 @@
+name: Prerelease
+
+# Builds unsigned prerelease binaries for macOS, Windows, Linux and Android.
+# Run it from the Actions tab, or push a v* tag.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish the prerelease under'
+        required: true
+        default: v0.1.0-pre.1
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web bundle
+        run: pnpm --filter @dfh/ui build
+
+      - name: Build main process
+        run: pnpm --filter @dfh/host-electron build
+
+      # electron-builder targets the host platform by default, so each runner
+      # produces its own formats from the shared electron-builder.yml.
+      - name: Package
+        run: pnpm --filter @dfh/host-electron package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            packages/host-electron/release/*.dmg
+            packages/host-electron/release/*.zip
+            packages/host-electron/release/*.exe
+            packages/host-electron/release/*.AppImage
+            packages/host-electron/release/*.deb
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Gradle's syncWebBundle task copies this into the APK's assets.
+      - name: Build web bundle
+        run: pnpm --filter @dfh/ui build
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Debug rather than release: a release APK would be unsigned and refuse
+      # to install. The debug signing key makes the prerelease installable.
+      - name: Assemble APK
+        working-directory: packages/host-android
+        run: gradle assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: |
+          mkdir -p apk-out
+          cp packages/host-android/app/build/outputs/apk/debug/app-debug.apk \
+             apk-out/DragonFableHelper-${{ env.TAG }}-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          if-no-files-found: error
+          path: apk-out/*.apk
+
+  publish:
+    name: Publish prerelease
+    needs: [desktop, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lhR artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: DragonFableHelper ${{ env.TAG }}
+          prerelease: true
+          generate_release_notes: false
+          files: artifacts/**/*
+          body: |
+            ## DragonFableHelper ${{ env.TAG }} (prerelease)
+
+            > **Automating DragonFable violates Artix Entertainment's Terms of Service
+            > and can get your account banned.** Use at your own risk, on an account you
+            > are willing to lose. Not affiliated with Artix Entertainment.
+
+            ### Downloads
+
+            | Platform | File |
+            | --- | --- |
+            | macOS (Apple Silicon) | `*-mac-arm64.dmg` |
+            | macOS (Intel) | `*-mac-x64.dmg` |
+            | Windows | `*-win-x64-setup.exe` (installer) or `*-win-x64-portable.exe` |
+            | Linux | `*-linux-x86_64.AppImage` or `*-linux-amd64.deb` |
+            | Android | `*-android.apk` |
+
+            ### These builds are unsigned
+
+            - **macOS** will refuse to open it: right-click the app and choose *Open*, or
+              run `xattr -dr com.apple.quarantine /Applications/DragonFableHelper.app`.
+            - **Windows** SmartScreen will warn: *More info* then *Run anyway*.
+            - **Android** needs "install from unknown sources" for your browser or file
+              manager. This is a debug-signed build, so it will not upgrade over a
+              differently-signed install.
+
+            ### What works
+
+            The app starts on a built-in **mock DragonFable** — quests, multi-wave
+            battles, drops, cooldowns and death — so you can try the bot, the rotations
+            and the script panel with no game client at all.
+
+            The live Ruffle bridge loads the real client, but its symbol map still needs
+            filling in against a running game; see the README section
+            *Wiring the live bridge* and use `bridge.probe()`.

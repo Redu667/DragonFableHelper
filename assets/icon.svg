@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6b0d07"/>
+      <stop offset="55%" stop-color="#3d0402"/>
+      <stop offset="100%" stop-color="#1a0100"/>
+    </linearGradient>
+    <radialGradient id="iris" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffd98a"/>
+      <stop offset="45%" stop-color="#f0952b"/>
+      <stop offset="100%" stop-color="#c0392b"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff8a3d" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ff8a3d" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="190" fill="url(#glow)"/>
+
+  <!-- Dragon eye: the lens shape formed by two arcs -->
+  <path d="M52 256 C 130 132, 382 132, 460 256 C 382 380, 130 380, 52 256 Z"
+        fill="#160100" stroke="#8d1d12" stroke-width="10"/>
+  <path d="M72 256 C 142 150, 370 150, 440 256 C 370 362, 142 362, 72 256 Z"
+        fill="url(#iris)"/>
+
+  <!-- Slit pupil -->
+  <path d="M256 138 C 292 186, 292 326, 256 374 C 220 326, 220 186, 256 138 Z" fill="#120100"/>
+
+  <!-- Specular highlight -->
+  <ellipse cx="198" cy="206" rx="40" ry="26" fill="#fff3d6" opacity="0.5" transform="rotate(-22 198 206)"/>
+
+  <!-- Brow / scale ridge -->
+  <path d="M40 236 C 120 96, 392 96, 472 236" fill="none" stroke="#c0392b" stroke-width="17"
+        stroke-linecap="round" opacity="0.85"/>
+</svg>

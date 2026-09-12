@@ -71,6 +71,25 @@ the game's origin; the bytes are local. Electron does the equivalent with a
 
 ---
 
+## Downloads
+
+Prerelease builds for macOS, Windows, Linux and Android are published from the
+[Prerelease workflow](../../actions/workflows/prerelease.yml) to the
+[Releases page](../../releases).
+
+| Platform | File |
+| --- | --- |
+| macOS (Apple Silicon / Intel) | `*-mac-arm64.dmg` / `*-mac-x64.dmg` |
+| Windows | `*-win-x64-setup.exe`, or `*-win-x64-portable.exe` |
+| Linux | `*-linux-x86_64.AppImage`, or `*-linux-amd64.deb` |
+| Android | `*-android.apk` |
+
+They are **unsigned**, so each OS will object the first time: on macOS
+right-click → *Open* (or `xattr -dr com.apple.quarantine` the app), on Windows
+choose *More info* → *Run anyway*, and on Android allow installs from unknown
+sources. The APK is debug-signed so it is installable but will not upgrade over
+a differently-signed build.
+
 ## Quickstart
 
 ```bash
@@ -203,6 +222,23 @@ a path moves, one map changes and every script keeps working.
 pnpm -r typecheck   # all packages
 pnpm -r test        # 89 tests
 ```
+
+### Building installers yourself
+
+```bash
+pnpm --filter @dfh/ui build              # the shared web bundle, needed by both hosts
+pnpm --filter @dfh/host-electron build   # compile main process + copy the bundle in
+pnpm --filter @dfh/host-electron package # electron-builder, current platform only
+```
+
+Artifacts land in `packages/host-electron/release/`. electron-builder only
+targets the platform it runs on, which is why the release workflow fans out
+across macOS, Windows and Linux runners.
+
+For Android, see the Android quickstart above; CI builds the same
+`gradle assembleDebug`.
+
+App icons are generated from [`assets/icon.svg`](./assets/icon.svg).
 
 ---
 

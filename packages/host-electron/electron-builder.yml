@@ -1,0 +1,65 @@
+appId: com.dfhelper.app
+productName: DragonFableHelper
+copyright: Copyright © 2026 DragonFableHelper contributors
+
+directories:
+  output: release
+  buildResources: build
+
+# Without this, artifacts inherit the scoped package name and the .deb comes
+# out as "@dfh/host-electron_0.1.0_amd64.deb" - a slash in a filename.
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+# The app has no runtime dependencies: the renderer is a pre-built bundle and
+# the main process is plain compiled JS, so nothing from node_modules ships.
+# That also sidesteps electron-builder's usual trouble with pnpm symlinks.
+files:
+  - dist/**/*
+  - renderer/**/*
+  - package.json
+
+npmRebuild: false
+buildDependenciesFromSource: false
+
+mac:
+  category: public.app-category.games
+  # Prereleases are unsigned; without this electron-builder looks for a
+  # certificate and fails the build on CI.
+  identity: null
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+
+dmg:
+  writeUpdateInfo: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-${version}-win-${arch}-setup.${ext}
+
+portable:
+  artifactName: ${productName}-${version}-win-${arch}-portable.${ext}
+
+linux:
+  # Defaults to the package name, which would install a binary literally called
+  # "@dfhhost-electron".
+  executableName: dragonfablehelper
+  maintainer: DragonFableHelper contributors <noreply@github.com>
+  category: Game
+  synopsis: Scriptable DragonFable automation client
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]

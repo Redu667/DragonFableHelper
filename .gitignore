@@ -1,0 +1,26 @@
+node_modules/
+dist/
+out/
+build/
+*.log
+.DS_Store
+.vite/
+coverage/
+packages/host/game/*.swf
+packages/host/game/ruffle/
+.env
+.env.local
+
+# Generated: the web bundle is copied into the APK at build time
+packages/host-android/app/src/main/assets/dfh/
+packages/host-android/.gradle/
+packages/host-android/local.properties
+
+# Desktop packaging output and the copied renderer bundle
+packages/host-electron/release/
+packages/host-electron/renderer/
+
+# ...but the generic build/ rule above must not swallow the app icon that
+# electron-builder needs as a build resource.
+!packages/host-electron/build/
+!packages/host-electron/build/**

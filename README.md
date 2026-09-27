@@ -39,8 +39,8 @@ two thin shells around the same bundle**:
                     │   MockBridge       │   RuffleBridge      │
                     │  (simulated game)  │  (the real client)  │
                     └────────────────────┴──────────┬─────────┘
-                                                    │ ExternalInterface
-                                                    │ + AVM1 variables
+                                                    │ fetch tap · callbacks
+                                                    │ clicks · pixel sensors
                                               ┌─────▼─────┐
                                               │ DFLoader  │
                                               │   .swf    │
@@ -175,44 +175,53 @@ See [`scripts/`](./scripts) for worked examples.
 
 ---
 
-## Wiring the live bridge — read this before reporting a bug
+## The live bridge, and what it can honestly know
 
-The mock bridge is complete. **The Ruffle bridge is a working harness whose
-symbol map still needs to be filled in against a real client**, and this is
-deliberate rather than an oversight.
+Ruffle has **no way to read a movie's ActionScript state from JavaScript** -
+no `GetVariable`, nothing. That rules out the obvious "poke `_root.hero.hp`"
+design outright, so the live bridge is built only on what Ruffle actually
+provides, each verified against Ruffle's source:
 
-DragonFable's internals are not public, they change between releases, and I
-could not inspect a live client while writing this — so rather than invent
-ActionScript paths and present them as fact, `packages/bridge-ruffle/src/df-symbols.ts`
-holds **clearly-labelled best guesses in one overridable map**, plus a probe
-that tells you which ones are real:
+| Channel | What Ruffle provides | What the bridge does with it |
+| --- | --- | --- |
+| **Server traffic** | Every request the movie makes goes through the page's own `window.fetch` | A tap installed before the movie loads records each reply; the extractor parses it (URL-encoded, XML or JSON) and fills the player's name, level, HP/MP, gold, … This is the primary source of state, and it works identically on desktop and Android. |
+| **ExternalInterface** | Callbacks the movie registers appear as properties of the player element | Discovered by enumeration and listed in the Live panel; you map them to actions there. |
+| **Input** | The wasm listens for pointer events on its canvas | For actions with no callback, the bridge clicks positions you recorded by clicking them once yourself. |
+| **Pixels** | The rendered frame is readable | Battles resolve inside the client, so turn and monster HP never touch the network. Sensors you sample from the frame (a lit hotbar, an HP bar) supply them. |
+| **`trace()`** | A trace observer | Shown in the Trace panel. |
 
-```js
-const probe = bridge.probe();
-probe.resolved;       // paths that returned a value
-probe.unresolved;     // paths that need overriding
-probe.callbacksFound; // ExternalInterface callbacks the client actually exposes
-```
+Nothing about the client is guessed and shipped as fact. What *is* shipped is
+a set of field-name aliases following Artix's own conventions (`intHP`,
+`intHPMax`, `strUsername`, …), matched case-insensitively against whatever
+the replies really contain - and the Live panel shows every field name each
+endpoint carried, so a miss is visible rather than silent.
 
-Then override only what is wrong:
+### Setting it up against a real client
 
-```js
-new RuffleBridge({ player, symbols: { playerHp: '_root.game.hero.hp' } });
-```
+1. Switch the bridge to **Ruffle (live)** and log in. Open the **Live** tab.
+2. **Server endpoints** fill in as the game talks to its server, with the
+   fields each reply carried and which bot fields they fed. If HP or gold
+   is not being picked up, the reply's actual key names are right there.
+3. **Callbacks**: if the movie registered any, map them to actions and save.
+4. **Click positions**: for each action, press *Record* and click that
+   button in the game. The bot will click the same spot.
+5. **Pixel sensors**: sample the spot that lights up on your turn, the HP
+   bars, the victory screen; then tell the bridge what each one means.
 
-Calls with no client support yet (`shop.buy`, `quest.load`, …) throw a named
-`BridgeError` instead of silently doing nothing, so you always know what is
-missing. Nothing outside that one file knows about the game's internals — when
-a path moves, one map changes and every script keeps working.
+Everything you set is persisted (browser storage; on desktop that is the
+`app://dfh` origin), so it survives restarts. From DevTools,
+`dfhSession.live.probe()` prints the whole discovery report.
 
----
+Calls the client gives no channel for throw a named `BridgeError` saying
+precisely what is missing - "no `rest` callback (found: …) and no click
+position for `rest`" - instead of doing nothing.
 
 ## Layout
 
 | Package | Contents |
 | --- | --- |
 | `packages/core` | Bot engine, script API, rotations, grinder, state, mock game. Pure TS. |
-| `packages/bridge-ruffle` | Ruffle host, DF symbol map + probe, state polling and event derivation |
+| `packages/bridge-ruffle` | Ruffle host, network tap, reply extractor, callback discovery, click input, pixel sensors, persisted profile |
 | `packages/ui` | React panels, shared by both hosts |
 | `packages/host-electron` | Desktop shell, CORS shim, filesystem script storage |
 | `packages/host-android` | WebView shell, APK asset serving at the game origin |
@@ -220,7 +229,7 @@ a path moves, one map changes and every script keeps working.
 
 ```bash
 pnpm -r typecheck   # all packages
-pnpm -r test        # 89 tests
+pnpm -r test        # 143 tests
 ```
 
 ### Building installers yourself

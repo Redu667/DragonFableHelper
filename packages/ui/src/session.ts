@@ -15,7 +15,15 @@ import {
   type ScriptStatus,
   type TraceEntry,
 } from '@dfh/core';
-import { RuffleBridge, type RufflePlayerElement } from '@dfh/bridge-ruffle';
+import {
+  LocalStorageProfileStore,
+  RuffleBridge,
+  type CallbackNames,
+  type CombatSensorBinding,
+  type DiscoveryReport,
+  type RufflePlayerElement,
+  type StagePoint,
+} from '@dfh/bridge-ruffle';
 
 export type BridgeKind = 'mock' | 'ruffle';
 
@@ -31,6 +39,10 @@ export interface SessionView {
   error: string | null;
   /** The live stage is mounting; the bridge swaps once the player is ready. */
   pendingLive: boolean;
+  /** What the live bridge has learned so far; null on the mock. */
+  discovery: DiscoveryReport | null;
+  /** A calibration is waiting for a click in the game; describes what for. */
+  calibrating: string | null;
 }
 
 /**
@@ -50,6 +62,8 @@ export class BotSession {
   private host: ScriptHost;
   private view: SessionView;
   private traceBuffer: TraceEntry[] = [];
+  private discoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private calibration: AbortController | null = null;
 
   constructor(kind: BridgeKind = 'mock') {
     this.bridge = new MockBridge({ seed: Date.now() % 100000, latencyMs: 120 });
@@ -67,6 +81,8 @@ export class BotSession {
       options: { ...defaultBotOptions },
       error: null,
       pendingLive: kind === 'ruffle',
+      discovery: null,
+      calibrating: null,
     };
 
     this.wire();
@@ -97,12 +113,18 @@ export class BotSession {
     this.bridge.events.on('trace', (entry) => {
       this.traceBuffer = [...this.traceBuffer.slice(-499), entry];
       this.update({ traces: this.traceBuffer });
+      // New traffic may have taught the live bridge something.
+      if (entry.kind === 'network' || entry.kind === 'trace') this.scheduleDiscovery();
     });
-    this.bridge.events.on('connected', () => this.update({ connected: true }));
+    this.bridge.events.on('connected', () => {
+      this.update({ connected: true });
+      this.refreshDiscovery();
+    });
     this.bridge.events.on('disconnected', () => this.update({ connected: false }));
     this.bridge.events.on('error', ({ message }) => this.update({ error: message }));
     this.bridge.events.on('death', () => this.log.warn('You died.'));
     this.bridge.events.on('levelUp', ({ level }) => this.log.info(`Level up! Now level ${level}.`));
+    this.bridge.events.on('loggedIn', ({ name }) => this.log.info(`Logged in as ${name}.`));
   }
 
   get currentBot(): Bot {
@@ -113,6 +135,11 @@ export class BotSession {
     return this.host;
   }
 
+  /** The live bridge, when that is what is connected. */
+  get live(): RuffleBridge | null {
+    return this.bridge instanceof RuffleBridge ? this.bridge : null;
+  }
+
   // -- lifecycle ---------------------------------------------------------
 
   /**
@@ -121,12 +148,13 @@ export class BotSession {
    */
   async useBridge(kind: BridgeKind, player?: RufflePlayerElement): Promise<void> {
     await this.host.stop();
+    this.cancelCalibration();
     await this.bridge.disconnect().catch(() => undefined);
     this.bot.detach();
 
     if (kind === 'ruffle') {
       if (!player) throw new Error('The Ruffle bridge needs a mounted player element');
-      this.bridge = new RuffleBridge({ player });
+      this.bridge = new RuffleBridge({ player, store: new LocalStorageProfileStore() });
     } else {
       this.bridge = new MockBridge({ seed: Date.now() % 100000, latencyMs: 120 });
     }
@@ -136,7 +164,7 @@ export class BotSession {
     this.host.events.on('statusChanged', ({ status }) => this.update({ scriptStatus: status }));
     this.traceBuffer = [];
     this.attachBridgeEvents();
-    this.update({ bridgeKind: kind, traces: [], error: null, pendingLive: false });
+    this.update({ bridgeKind: kind, traces: [], error: null, pendingLive: false, discovery: null });
   }
 
   /** Ask the UI to mount the real client; `useBridge` follows once it loads. */
@@ -163,6 +191,110 @@ export class BotSession {
   setOptions(patch: Partial<BotOptions>): void {
     Object.assign(this.bot.options, patch);
     this.update({ options: { ...this.bot.options } });
+  }
+
+  // -- live bridge: discovery and calibration ---------------------------
+
+  refreshDiscovery(): void {
+    this.update({ discovery: this.live?.probe() ?? null });
+  }
+
+  private scheduleDiscovery(): void {
+    if (this.discoveryTimer !== null) return;
+    this.discoveryTimer = setTimeout(() => {
+      this.discoveryTimer = null;
+      this.refreshDiscovery();
+    }, 300);
+  }
+
+  /** Record the user's next click in the game as the position of `action`. */
+  async calibrateClick(action: string): Promise<void> {
+    const live = this.live;
+    if (!live) return;
+    this.cancelCalibration();
+    this.calibration = new AbortController();
+    this.update({ calibrating: `Click the "${action}" button in the game` });
+    try {
+      const point = await live.calibrateClick(action, this.calibration.signal);
+      this.log.info(`Recorded "${action}" at (${point.x}, ${point.y}).`);
+    } catch (error) {
+      this.log.warn((error as Error).message);
+    } finally {
+      this.calibration = null;
+      this.update({ calibrating: null });
+      this.refreshDiscovery();
+    }
+  }
+
+  /** Sample the pixel the user clicks next and store it as an on/off sensor. */
+  async calibratePointSensor(name: string): Promise<void> {
+    const live = this.live;
+    if (!live || !name) return;
+    this.cancelCalibration();
+    this.calibration = new AbortController();
+    this.update({ calibrating: `Click the spot in the game that should mean "${name}"` });
+    try {
+      const point = await live.input.capturePoint({ signal: this.calibration.signal });
+      const sensor = live.addPointSensor(name, point);
+      if (sensor) this.log.info(`Sensor "${name}" at (${point.x}, ${point.y}) = rgb(${sensor.color.join(', ')}).`);
+      else this.log.warn('Could not read pixels from the game canvas. Is the canvas renderer on?');
+    } catch (error) {
+      this.log.warn((error as Error).message);
+    } finally {
+      this.calibration = null;
+      this.update({ calibrating: null });
+      this.refreshDiscovery();
+    }
+  }
+
+  /** Two clicks: the full end and the empty end of a bar. */
+  async calibrateBarSensor(name: string): Promise<void> {
+    const live = this.live;
+    if (!live || !name) return;
+    this.cancelCalibration();
+    this.calibration = new AbortController();
+    const { signal } = this.calibration;
+    try {
+      this.update({ calibrating: `Click the FULL end of the "${name}" bar` });
+      const from = await live.input.capturePoint({ signal });
+      this.update({ calibrating: `Now click the EMPTY end of the "${name}" bar` });
+      const to = await live.input.capturePoint({ signal });
+      const sensor = live.addBarSensor(name, from, to);
+      if (sensor) this.log.info(`Bar "${name}" from (${from.x}, ${from.y}) to (${to.x}, ${to.y}).`);
+      else this.log.warn('Could not read pixels from the game canvas.');
+    } catch (error) {
+      this.log.warn((error as Error).message);
+    } finally {
+      this.calibration = null;
+      this.update({ calibrating: null });
+      this.refreshDiscovery();
+    }
+  }
+
+  cancelCalibration(): void {
+    this.calibration?.abort();
+    this.calibration = null;
+    if (this.view.calibrating) this.update({ calibrating: null });
+  }
+
+  removeSensor(name: string): void {
+    this.live?.removeSensor(name);
+    this.refreshDiscovery();
+  }
+
+  setCallbackNames(names: CallbackNames): void {
+    this.live?.setCallbackNames(names);
+    this.refreshDiscovery();
+  }
+
+  setCombatBinding(binding: CombatSensorBinding): void {
+    this.live?.setCombatBinding(binding);
+    this.refreshDiscovery();
+  }
+
+  /** Sample a stage point right now, for the panel's colour readout. */
+  peekPixel(point: StagePoint): [number, number, number] | null {
+    return this.live?.sensors.peek(point) ?? null;
   }
 
   // -- actions -----------------------------------------------------------

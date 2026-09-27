@@ -42,7 +42,9 @@ export function TracePanel({ entries }: { entries: readonly TraceEntry[] }) {
         <div key={index}>
           <time>{clock(entry.timestamp)}</time>
           <span className={`dir ${entry.direction}`}>{entry.direction === 'toGame' ? '>>' : '<<'}</span>
+          {entry.kind && entry.kind !== 'call' && <span className="pill" style={{ marginRight: 6 }}>{entry.kind}</span>}
           {entry.label}
+          {entry.meta?.status !== undefined && <span className="dir"> {String(entry.meta.status)}</span>}
           {entry.payload !== undefined && entry.payload !== null && (
             <span className="dir"> {JSON.stringify(entry.payload).slice(0, 140)}</span>
           )}

@@ -1,3 +1,4 @@
+import { getSharedNetworkTap } from './network-tap.js';
 import {
   DF_GAME_BASE_URL,
   DF_LOADER_SWF,
@@ -17,6 +18,11 @@ export interface RuffleHostOptions {
   swfUrl?: string;
   /** Merged over {@link dfRuffleConfig}. */
   config?: Record<string, unknown>;
+  /**
+   * Render on Ruffle's canvas renderer so pixel sensors can read frames.
+   * Costs some performance; leave off until sensors are being set up.
+   */
+  readablePixels?: boolean;
 }
 
 /**
@@ -64,9 +70,12 @@ export async function loadRuffle(
  * the host shells handle the origin.
  */
 export async function mountDragonFable(options: RuffleHostOptions): Promise<RufflePlayerElement> {
-  const { container, swfUrl = `${DF_GAME_BASE_URL}${DF_LOADER_SWF}`, config, ruffleScriptUrl } = options;
+  const { container, swfUrl = `${DF_GAME_BASE_URL}${DF_LOADER_SWF}`, config, ruffleScriptUrl, readablePixels } = options;
 
-  const api = await loadRuffle(ruffleScriptUrl, dfRuffleConfig(config));
+  // Observe fetch before the movie exists so its very first request is seen.
+  getSharedNetworkTap().install();
+
+  const api = await loadRuffle(ruffleScriptUrl, dfRuffleConfig({ readablePixels, overrides: config }));
   const player = api.createPlayer();
   const element = player as unknown as HTMLElement;
 
@@ -75,11 +84,7 @@ export async function mountDragonFable(options: RuffleHostOptions): Promise<Ruff
   element.style.display = 'block';
 
   container.replaceChildren(element);
-  await (player as unknown as { load(options: Record<string, unknown>): Promise<void> }).load({
-    url: swfUrl,
-    allowScriptAccess: true,
-    ...config,
-  });
+  await player.load?.({ url: swfUrl, allowScriptAccess: true, ...config });
 
   return player;
 }

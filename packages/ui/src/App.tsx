@@ -8,8 +8,9 @@ import { GrindPanel } from './panels/GrindPanel.js';
 import { ScriptPanel } from './panels/ScriptPanel.js';
 import { LogPanel, TracePanel } from './panels/LogPanel.js';
 import { OptionsPanel } from './panels/OptionsPanel.js';
+import { LivePanel } from './panels/LivePanel.js';
 
-const TABS = ['Status', 'Grind', 'Script', 'Log', 'Trace', 'Options'] as const;
+const TABS = ['Status', 'Grind', 'Script', 'Live', 'Log', 'Trace', 'Options'] as const;
 type Tab = (typeof TABS)[number];
 
 export function App() {
@@ -17,8 +18,11 @@ export function App() {
   const view = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [tab, setTab] = useState<Tab>('Status');
 
-  // Connect the default (mock) bridge so the app is usable immediately.
+  // Connect the default (mock) bridge so the app is usable immediately, and
+  // make the session reachable from DevTools: `dfhSession.live.probe()` is
+  // the quickest way to see what the live bridge has learned.
   useEffect(() => {
+    (window as unknown as { dfhSession: BotSession }).dfhSession = session;
     void session.connect();
   }, [session]);
 
@@ -106,6 +110,22 @@ export function App() {
             )}
             {tab === 'Script' && (
               <ScriptPanel status={view.scriptStatus} onRun={runScript} onStop={stop} disabled={!view.connected} />
+            )}
+            {tab === 'Live' && (
+              <LivePanel
+                discovery={view.discovery}
+                calibrating={view.calibrating}
+                isLive={view.bridgeKind === 'ruffle'}
+                binding={session.live?.currentProfile.combat ?? {}}
+                onRefresh={() => session.refreshDiscovery()}
+                onCalibrateClick={(a) => void session.calibrateClick(a)}
+                onCalibratePoint={(n) => void session.calibratePointSensor(n)}
+                onCalibrateBar={(n) => void session.calibrateBarSensor(n)}
+                onCancel={() => session.cancelCalibration()}
+                onRemoveSensor={(n) => session.removeSensor(n)}
+                onSetCallbacks={(names) => session.setCallbackNames(names)}
+                onSetBinding={(b) => session.setCombatBinding(b)}
+              />
             )}
             {tab === 'Log' && <LogPanel entries={view.logs} onClear={() => session.clearLogs()} />}
             {tab === 'Trace' && <TracePanel entries={view.traces} />}

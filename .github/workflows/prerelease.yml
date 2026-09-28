@@ -71,9 +71,12 @@ jobs:
           battles, drops, cooldowns and death - so you can try the bot, the rotations
           and the script panel with no game client at all.
 
-          The live Ruffle bridge loads the real client, but its symbol map still needs
-          filling in against a running game; see the README section
-          *Wiring the live bridge* and use `bridge.probe()`.
+          The live Ruffle bridge loads the real client, reads player state from the
+          game's own server traffic, and drives it through whatever ExternalInterface
+          callbacks the client registers plus recorded button clicks. Those callback
+          names and click positions are learned in-app on the **Live** tab, not
+          shipped here; see the README section *The live bridge, and what it can
+          honestly know* for the setup steps.
           NOTES
 
   desktop:

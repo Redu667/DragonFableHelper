@@ -76,11 +76,17 @@ export type GameCall = keyof GameCallArgs;
 /** Direction of a logged message, for the packet/trace inspector. */
 export type TraceDirection = 'toGame' | 'fromGame';
 
+/** What produced a trace entry. Plain bridge calls when omitted. */
+export type TraceKind = 'call' | 'network' | 'trace' | 'input';
+
 export interface TraceEntry {
   timestamp: number;
   direction: TraceDirection;
   label: string;
   payload: unknown;
+  kind?: TraceKind;
+  /** Free-form details the inspector can render: status, duration, ... */
+  meta?: Record<string, unknown>;
 }
 
 export interface BridgeEvents {

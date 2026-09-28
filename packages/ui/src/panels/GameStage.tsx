@@ -30,7 +30,7 @@ export function GameStage({ live, onPlayerReady, onError }: GameStageProps) {
     setLoading(true);
     let disposeFit: (() => void) | undefined;
 
-    mountDragonFable({ container: stage })
+    mountDragonFable({ container: stage, readablePixels: true })
       .then((player) => {
         disposeFit = fitStage(stage, wrap);
         setLoading(false);

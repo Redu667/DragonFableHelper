@@ -1,41 +1,48 @@
 /**
- * Minimal typings for the bits of Ruffle we use.
- *
- * Ruffle (https://ruffle.rs) is the open-source Flash emulator that lets a
- * DragonFable client run in 2026, in both an Electron renderer and an Android
- * WebView - which is why the bot lives on the web side of this project rather
- * than in a platform-specific host.
+ * Typings for the parts of Ruffle this project uses, taken from Ruffle's
+ * own sources rather than from memory - the important discovery being what
+ * is *not* there: Ruffle has no `GetVariable` / `SetVariable`, so nothing in
+ * a movie's ActionScript state can be read from JavaScript. What it does
+ * offer: ExternalInterface callbacks as element properties, a trace
+ * observer, and all of the movie's HTTP traffic through the page's `fetch`.
  */
 
-/** Ruffle honours the classic Flash plugin API for AVM1 (ActionScript 2) content. */
-export interface FlashLegacyApi {
-  /** Read an AS2 variable, e.g. `_root.myAvatar.objData.intHP`. */
-  GetVariable?(path: string): string | null;
-  /** Write an AS2 variable. */
-  SetVariable?(path: string, value: string): void;
-  /** Invoke an AS2 function using Flash's XML call format. */
-  CallFunction?(requestXml: string): string | null;
+/** The versioned player API returned by `element.ruffle(1)`. */
+export interface RufflePlayerV1 {
+  readonly readyState: number;
+  readonly isPlaying: boolean;
+  load(options: Record<string, unknown>): Promise<void>;
+  reload(): Promise<void>;
+  resume(): void;
+  suspend(): void;
+  callExternalInterface(name: string, ...args: unknown[]): unknown;
+  set traceObserver(observer: ((message: string) => void) | null);
 }
 
 /**
  * The `<ruffle-player>` element.
  *
- * Callbacks the movie registers via `ExternalInterface.addCallback` show up as
- * callable own properties, so the index signature is how we reach them.
+ * Callbacks the movie registers with `ExternalInterface.addCallback` are
+ * defined as own properties of this element, hence the index signature.
+ * Everything is optional so tests can stand in a plain object.
  */
-export interface RufflePlayerElement extends FlashLegacyApi {
-  play?(): void;
-  pause?(): void;
-  readonly isPlaying?: boolean;
+export interface RufflePlayerElement {
+  ruffle?(version?: number): RufflePlayerV1;
+  readonly readyState?: number;
+  readonly shadowRoot?: ShadowRoot | null;
+  set traceObserver(observer: ((message: string) => void) | null);
+  load?(options: Record<string, unknown>): Promise<void>;
   [key: string]: unknown;
+}
+
+export const enum RuffleReadyState {
+  HaveNothing = 0,
+  Loading = 1,
+  Loaded = 2,
 }
 
 export interface RuffleSourceApi {
   createPlayer(): RufflePlayerElement;
-}
-
-export interface RuffleApi {
-  newest(): RuffleSourceApi | null;
 }
 
 declare global {
@@ -51,22 +58,37 @@ declare global {
 export const DF_STAGE_WIDTH = 750;
 export const DF_STAGE_HEIGHT = 550;
 
-export const DF_GAME_BASE_URL = 'https://play.dragonfable.com/game/';
+export const DF_GAME_ORIGIN = 'https://play.dragonfable.com';
+export const DF_GAME_BASE_URL = `${DF_GAME_ORIGIN}/game/`;
 export const DF_LOADER_SWF = 'DFLoader.swf';
 
+export interface DfRuffleConfigOptions {
+  /**
+   * Use Ruffle's canvas renderer so frames can be read back for pixel
+   * sensors. WebGL frames are not readable once presented.
+   */
+  readablePixels?: boolean;
+  overrides?: Record<string, unknown>;
+}
+
 /**
- * Ruffle config known to load DragonFable.
+ * Ruffle config known to load DragonFable. Every key here exists in Ruffle's
+ * `DEFAULT_CONFIG`.
  *
- * `urlRewriteRules` is the load-bearing part: the loader requests its assets
- * with paths relative to the game directory, so every request is rewritten
- * onto the real game origin. `allowScriptAccess` has to be on for
- * ExternalInterface - which is exactly what the bridge drives the game
- * through.
+ * - `urlRewriteRules` sends the loader's relative asset requests to the real
+ *   game directory.
+ * - `allowScriptAccess` enables ExternalInterface in both directions.
+ * - `credentialAllowList` lets the movie's requests carry the game's cookies.
+ * - `backgroundExecutionMode: mainThread` keeps the game - and the bot -
+ *   running while the window is in the background.
  */
-export function dfRuffleConfig(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+export function dfRuffleConfig(options: DfRuffleConfigOptions = {}): Record<string, unknown> {
   return {
     urlRewriteRules: [[/^(?:https?:\/\/[^/]+)?\/?(?:game\/)?(.*)$/i, `${DF_GAME_BASE_URL}$1`]],
     allowScriptAccess: true,
+    allowNetworking: 'all',
+    credentialAllowList: [DF_GAME_ORIGIN],
+    backgroundExecutionMode: 'mainThread',
     autoplay: 'auto',
     unmuteOverlay: 'hidden',
     splashScreen: false,
@@ -75,9 +97,9 @@ export function dfRuffleConfig(overrides: Record<string, unknown> = {}): Record<
     scrollingBehavior: 'never',
     upgradeToHttps: true,
     letterbox: 'off',
-    preferredRenderer: 'webgl',
+    preferredRenderer: options.readablePixels ? 'canvas' : 'webgl',
     quality: 'medium',
     logLevel: 'error',
-    ...overrides,
+    ...options.overrides,
   };
 }

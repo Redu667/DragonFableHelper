@@ -1,88 +1,98 @@
-import { app, BrowserWindow, ipcMain, net, protocol, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, net, protocol, shell } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 const GAME_ORIGIN = 'https://play.dragonfable.com';
+/** Path under the game origin that the app serves itself. Same as Android. */
+const APP_PATH = '/__dfh/';
+const APP_URL = `${GAME_ORIGIN}${APP_PATH}index.html`;
 const DEV_SERVER = process.env.DFH_DEV_SERVER;
-
-/**
- * The renderer is served from its own origin rather than `file://`.
- *
- * A `file://` page has the opaque origin "null", and a server response can
- * only be read across origins with credentials if it names the requesting
- * origin exactly - "*" is rejected the moment a cookie is involved. Since the
- * game's session rides on cookies, the page needs a real origin the CORS shim
- * below can echo. Registering the scheme as standard and secure also gives
- * the page localStorage, which is where the calibrated profile lives.
- */
-const APP_SCHEME = 'app';
-const APP_HOST = 'dfh';
-const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
-const PAGE_ORIGIN = DEV_SERVER ? new URL(DEV_SERVER).origin : APP_ORIGIN;
-
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: APP_SCHEME,
-    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
-  },
-]);
 
 /** Where user scripts live on disk. */
 const scriptsDir = () => path.join(app.getPath('userData'), 'scripts');
 const rendererDir = () => path.join(__dirname, '../renderer');
 
-/** Serve the built renderer bundle at app://dfh/... */
-function serveRenderer(): void {
-  protocol.handle(APP_SCHEME, (request) => {
+/**
+ * Serve the renderer from a path *on the game's own origin*.
+ *
+ * The page lives at https://play.dragonfable.com/__dfh/, exactly as the
+ * Android shell and the DF Pocket app do it. Every request the game makes is
+ * then same-origin: cookies are first-party, redirects behave as they would
+ * on the real site, and nothing depends on the server sending CORS headers.
+ * Serving the page from an app:// origin instead made each game request
+ * cross-origin, and the loader could fail to fetch its engine.
+ *
+ * Only paths under {@link APP_PATH} are answered locally. Everything else,
+ * the game's traffic included, goes to the network untouched.
+ */
+function serveUnderGameOrigin(): void {
+  protocol.handle('https', (request) => {
     const url = new URL(request.url);
-    let relative = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
-    // Never let a path escape the bundle directory.
-    relative = path.normalize(relative).replace(/^(\.\.[/\\])+/, '');
-    const file = path.join(rendererDir(), relative);
-    if (!file.startsWith(rendererDir())) {
-      return new Response('Not found', { status: 404 });
+    if (url.origin === GAME_ORIGIN && url.pathname.startsWith(APP_PATH)) {
+      return serveApp(url);
     }
-    return net.fetch(pathToFileURL(file).toString());
+    return passThrough(request, url);
   });
+}
+
+/** The page the official client runs on; what the game's requests cite. */
+const GAME_PAGE = `${GAME_ORIGIN}/game/`;
+
+/**
+ * Send a request on to the network as the browser would have.
+ *
+ * Requests fetched from the main process lose the headers a page adds
+ * itself, so game requests get the Referer and, for POSTs, the Origin that
+ * the official play page sends. Redirects are followed here: Chromium does
+ * not follow a 3xx handed back by a protocol handler, so the page sees the
+ * final response under the URL it asked for.
+ */
+function passThrough(request: Request, url: URL): Promise<Response> {
+  const options = { bypassCustomProtocolHandlers: true };
+  if (url.origin !== GAME_ORIGIN) return net.fetch(request, options);
+
+  const headers = new Headers(request.headers);
+  if (!headers.has('referer')) headers.set('Referer', GAME_PAGE);
+  if (request.method !== 'GET' && request.method !== 'HEAD' && !headers.has('origin')) {
+    headers.set('Origin', GAME_ORIGIN);
+  }
+  const init: RequestInit & { duplex?: 'half' } = { headers };
+  if (request.body) init.duplex = 'half';
+  return net.fetch(new Request(request, init), options);
+}
+
+function serveApp(url: URL): Promise<Response> | Response {
+  // In development the Vite server serves the same path (its base is /__dfh/).
+  if (DEV_SERVER) {
+    return net.fetch(new URL(url.pathname + url.search, DEV_SERVER).toString(), {
+      bypassCustomProtocolHandlers: true,
+    });
+  }
+
+  let relative = decodeURIComponent(url.pathname.slice(APP_PATH.length)) || 'index.html';
+  // Never let a path escape the bundle directory.
+  relative = path.normalize(relative).replace(/^(\.\.[/\\])+/, '');
+  const root = rendererDir();
+  const file = path.join(root, relative);
+  if (file !== root && !file.startsWith(root + path.sep)) {
+    return new Response('Not found', { status: 404 });
+  }
+  return net.fetch(pathToFileURL(file).toString());
 }
 
 /**
- * Let Ruffle talk to the game's server from our origin.
- *
- * Responses from the game host get CORS headers naming this page's origin,
- * with credentials allowed, so the movie's cookie-bearing requests succeed
- * and their bodies are readable (which is what the network tap depends on).
- * A preflight the game server does not understand is answered here with a
- * 204 instead of whatever error it returned.
+ * Present as the Chrome that Electron is, without the Electron and app
+ * tokens. Some hosts treat unfamiliar user agents as bots.
  */
-function allowGameRequests(): void {
-  const filter = { urls: [`${GAME_ORIGIN}/*`] };
-
-  session.defaultSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
-    // The server sees the game's own site as the caller, as it expects.
-    const requestHeaders = { ...details.requestHeaders, Referer: `${GAME_ORIGIN}/`, Origin: GAME_ORIGIN };
-    callback({ requestHeaders });
-  });
-
-  session.defaultSession.webRequest.onHeadersReceived(filter, (details, callback) => {
-    const headers: Record<string, string[]> = {};
-    for (const [key, value] of Object.entries(details.responseHeaders ?? {})) {
-      if (!/^access-control-/i.test(key)) headers[key] = Array.isArray(value) ? value : [String(value)];
-    }
-    headers['Access-Control-Allow-Origin'] = [PAGE_ORIGIN];
-    headers['Access-Control-Allow-Credentials'] = ['true'];
-    headers['Access-Control-Allow-Methods'] = ['GET, POST, OPTIONS'];
-    headers['Access-Control-Allow-Headers'] = ['Content-Type, X-Requested-With'];
-    headers['Access-Control-Expose-Headers'] = ['Content-Type, Content-Length'];
-
-    if (details.method === 'OPTIONS') {
-      callback({ responseHeaders: headers, statusLine: 'HTTP/1.1 204 No Content' });
-      return;
-    }
-    callback({ responseHeaders: headers });
-  });
+function useBrowserUserAgent(): void {
+  const tokens = [/\sElectron\/\S+/g, new RegExp(`\\s${escapeRegExp(app.getName())}\\/\\S+`, 'g')];
+  let agent = app.userAgentFallback;
+  for (const token of tokens) agent = agent.replace(token, '');
+  app.userAgentFallback = agent;
 }
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
@@ -106,12 +116,8 @@ async function createWindow(): Promise<void> {
     return { action: 'deny' };
   });
 
-  if (DEV_SERVER) {
-    await window.loadURL(DEV_SERVER);
-    window.webContents.openDevTools({ mode: 'detach' });
-  } else {
-    await window.loadURL(`${APP_ORIGIN}/index.html`);
-  }
+  await window.loadURL(APP_URL);
+  if (DEV_SERVER) window.webContents.openDevTools({ mode: 'detach' });
 }
 
 /** Filesystem-backed script storage, exposed to the renderer over IPC. */
@@ -147,9 +153,10 @@ function registerScriptIpc(): void {
   ipcMain.handle('scripts:dir', () => scriptsDir());
 }
 
+useBrowserUserAgent();
+
 void app.whenReady().then(async () => {
-  serveRenderer();
-  allowGameRequests();
+  serveUnderGameOrigin();
   registerScriptIpc();
   await createWindow();
 

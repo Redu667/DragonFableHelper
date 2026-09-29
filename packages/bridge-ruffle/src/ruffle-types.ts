@@ -60,7 +60,12 @@ export const DF_STAGE_HEIGHT = 550;
 
 export const DF_GAME_ORIGIN = 'https://play.dragonfable.com';
 export const DF_GAME_BASE_URL = `${DF_GAME_ORIGIN}/game/`;
-export const DF_LOADER_SWF = 'DFLoader.swf';
+/**
+ * The loader, with the same `ver` query the DF Pocket client uses. Ruffle
+ * hands a SWF URL's query string to the movie as parameters, as Flash did,
+ * so this matches what the loader sees on the official play page.
+ */
+export const DF_LOADER_SWF = 'DFLoader.swf?ver=393831';
 
 export interface DfRuffleConfigOptions {
   /**
@@ -75,8 +80,13 @@ export interface DfRuffleConfigOptions {
  * Ruffle config known to load DragonFable. Every key here exists in Ruffle's
  * `DEFAULT_CONFIG`.
  *
- * - `urlRewriteRules` sends the loader's relative asset requests to the real
- *   game directory.
+ * - `base` makes the loader's relative URLs resolve against the game
+ *   directory. Ruffle, like Flash, otherwise resolves them against the *page*
+ *   URL, and our page is not in /game/: the loader's relative request for its
+ *   engine then points somewhere that does not exist, and it shows "Error
+ *   loading Game Engine".
+ * - `urlRewriteRules` sends any remaining asset requests to the real game
+ *   directory.
  * - `allowScriptAccess` enables ExternalInterface in both directions.
  * - `credentialAllowList` lets the movie's requests carry the game's cookies.
  * - `backgroundExecutionMode: mainThread` keeps the game - and the bot -
@@ -84,6 +94,7 @@ export interface DfRuffleConfigOptions {
  */
 export function dfRuffleConfig(options: DfRuffleConfigOptions = {}): Record<string, unknown> {
   return {
+    base: DF_GAME_BASE_URL,
     urlRewriteRules: [[/^(?:https?:\/\/[^/]+)?\/?(?:game\/)?(.*)$/i, `${DF_GAME_BASE_URL}$1`]],
     allowScriptAccess: true,
     allowNetworking: 'all',

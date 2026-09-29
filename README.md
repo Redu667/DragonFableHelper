@@ -55,7 +55,7 @@ two thin shells around the same bundle**:
 covered by 65 fast unit tests, and why the same bot engine runs unchanged on a
 phone.
 
-### The origin trick (mobile)
+### The origin trick
 
 DragonFable's loader fetches assets relative to its own origin, and
 `ExternalInterface` — how the bot talks to the game — is gated on script
@@ -66,8 +66,9 @@ The Android host solves this the way the excellent
 page at the game's origin. We serve our bundle from
 `https://play.dragonfable.com/__dfh/` and intercept exactly that path in
 `shouldInterceptRequest`, handing back files from the APK. The page's origin is
-the game's origin; the bytes are local. Electron does the equivalent with a
-`webRequest` CORS shim.
+the game's origin; the bytes are local. Electron does exactly the same by
+intercepting `https` and answering `/__dfh/` from the packaged bundle, with
+every other request passed through to the network.
 
 ---
 
@@ -208,8 +209,9 @@ endpoint carried, so a miss is visible rather than silent.
 5. **Pixel sensors**: sample the spot that lights up on your turn, the HP
    bars, the victory screen; then tell the bridge what each one means.
 
-Everything you set is persisted (browser storage; on desktop that is the
-`app://dfh` origin), so it survives restarts. From DevTools,
+Everything you set is persisted in browser storage, so it survives
+restarts. Both shells serve the app from `https://play.dragonfable.com/__dfh/`,
+so the page shares the game's origin and its requests are same-origin. From DevTools,
 `dfhSession.live.probe()` prints the whole discovery report.
 
 Calls the client gives no channel for throw a named `BridgeError` saying
@@ -223,7 +225,7 @@ position for `rest`" - instead of doing nothing.
 | `packages/core` | Bot engine, script API, rotations, grinder, state, mock game. Pure TS. |
 | `packages/bridge-ruffle` | Ruffle host, network tap, reply extractor, callback discovery, click input, pixel sensors, persisted profile |
 | `packages/ui` | React panels, shared by both hosts |
-| `packages/host-electron` | Desktop shell, CORS shim, filesystem script storage |
+| `packages/host-electron` | Desktop shell, bundle served at the game origin, filesystem script storage |
 | `packages/host-android` | WebView shell, APK asset serving at the game origin |
 | `scripts` | Example bot scripts |
 

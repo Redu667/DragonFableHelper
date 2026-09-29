@@ -140,7 +140,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # The action's default package list still names the legacy 'tools'
+      # package, which Google has removed from the SDK repository, so
+      # sdkmanager fails before anything is built. Ask only for what the
+      # build needs; the compile SDK and build-tools are fetched by Gradle.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - uses: pnpm/action-setup@v4
 
